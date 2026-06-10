@@ -1,0 +1,6 @@
+flask
+anthropic
+pinecone
+voyageai
+supabase
+gunicorn

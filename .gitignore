@@ -1,0 +1,6 @@
+.env
+__pycache__
+*.pyc
+load_transcripts.py
+.DS_Store
+venv
