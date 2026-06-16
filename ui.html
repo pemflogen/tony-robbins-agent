@@ -435,11 +435,24 @@
   #send-btn:hover:not(:disabled) { background: #c14d1d; }
   #send-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
+  /* SIDEBAR OVERLAY (mobile tap-outside-to-close) */
+  #sidebar-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 260px;
+    right: 0;
+    bottom: 0;
+    z-index: 99;
+    background: rgba(0,0,0,0.35);
+  }
+
   /* MOBILE */
   @media (max-width: 640px) {
     #sidebar { position: absolute; height: 100%; z-index: 100; }
     #sidebar:not(.hidden) { transform: translateX(0); }
     #sidebar.hidden { transform: translateX(-260px); }
+    #sidebar-overlay.visible { display: block; }
     .msg-wrapper { max-width: 90%; }
     header { padding: 12px 14px; }
     #chat { padding: 16px 14px; }
@@ -473,6 +486,8 @@
     </div>
   </div>
 </div>
+
+<div id="sidebar-overlay"></div>
 
 <div id="app">
   <!-- SIDEBAR -->
@@ -564,7 +579,14 @@
   function toggleSidebar() {
     sidebarOpen = !sidebarOpen;
     document.getElementById('sidebar').classList.toggle('hidden', !sidebarOpen);
+    document.getElementById('sidebar-overlay').classList.toggle('visible', sidebarOpen);
   }
+
+  document.getElementById('sidebar-overlay').addEventListener('click', function() {
+    sidebarOpen = false;
+    document.getElementById('sidebar').classList.add('hidden');
+    this.classList.remove('visible');
+  });
 
   if (!sidebarOpen) document.getElementById('sidebar').classList.add('hidden');
 
@@ -614,6 +636,7 @@
       if (window.innerWidth <= 640) {
         sidebarOpen = false;
         document.getElementById('sidebar').classList.add('hidden');
+        document.getElementById('sidebar-overlay').classList.remove('visible');
       }
     } catch(e) { console.error('Failed to load conversation', e); }
   }
