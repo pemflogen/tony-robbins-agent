@@ -18,6 +18,7 @@ SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 APP_PASSWORD = os.environ.get("APP_PASSWORD", "Got1Robbinsagent!")
+AGENT_ID = "tony-robbins"
 
 SYSTEM_PROMPT = """You are an AI coach trained exclusively on Tony Robbins' mindset and peak performance methodology. You have deep knowledge of his frameworks on psychology, emotional mastery, decision-making, and personal transformation — including the Six Human Needs, the Triad (physiology, focus, language), Neuro-Associative Conditioning (NAC), the Dickens Process, Rapid Planning Method (RPM), and his teachings on beliefs, state management, and breakthrough.
 
@@ -89,8 +90,29 @@ def chat():
 
 @app.route("/conversations", methods=["GET"])
 def get_conversations():
-    result = supabase.table("conversations").select("id,team_member,title,created_at").order("created_at", desc=True).execute()
-    return jsonify(result.data)
+    result = supabase.table("conversations").select("id,team_member,title,messages,created_at").eq("agent_id", AGENT_ID).order("created_at", desc=True).execute()
+    convs = []
+    for row in result.data:
+        preview = ""
+        messages = row.get("messages") or []
+        for m in messages:
+            if m.get("role") == "user":
+                content = m.get("content", "")
+                if isinstance(content, str):
+                    preview = content[:60]
+                elif isinstance(content, list):
+                    text_part = next((p for p in content if p.get("type") == "text"), None)
+                    if text_part:
+                        preview = text_part.get("text", "")[:60]
+                break
+        convs.append({
+            "id": row["id"],
+            "team_member": row["team_member"],
+            "title": row["title"],
+            "preview": preview,
+            "created_at": row["created_at"],
+        })
+    return jsonify(convs)
 
 @app.route("/conversations", methods=["POST"])
 def save_conversation():
@@ -98,7 +120,8 @@ def save_conversation():
     result = supabase.table("conversations").insert({
         "team_member": data.get("team_member"),
         "title": data.get("title"),
-        "messages": data.get("messages")
+        "messages": data.get("messages"),
+        "agent_id": AGENT_ID
     }).execute()
     return jsonify(result.data[0])
 
@@ -108,6 +131,15 @@ def get_conversation(conv_id):
     if result.data:
         return jsonify(result.data[0])
     return jsonify({"error": "Not found"}), 404
+
+@app.route("/conversations/<int:conv_id>", methods=["PATCH"])
+def rename_conversation(conv_id):
+    data = request.json
+    title = data.get("title", "").strip()
+    if not title:
+        return jsonify({"error": "Title required"}), 400
+    supabase.table("conversations").update({"title": title}).eq("id", conv_id).execute()
+    return jsonify({"success": True})
 
 @app.route("/conversations/<int:conv_id>", methods=["DELETE"])
 def delete_conversation(conv_id):

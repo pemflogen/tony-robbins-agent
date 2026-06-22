@@ -196,8 +196,17 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  .conv-meta {
+  .conv-preview {
     font-size: 0.75rem;
+    color: #6a8aaa;
+    opacity: 0.7;
+    margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .conv-meta {
+    font-size: 0.7rem;
     color: #4a6280;
     margin-top: 2px;
   }
@@ -214,6 +223,18 @@
     transition: color 0.15s;
   }
   .conv-delete:hover { color: #e74c3c; }
+  .conv-rename-input {
+    background: #0a1628;
+    border: 1px solid #e8622c;
+    border-radius: 4px;
+    color: #f5f0e8;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.85rem;
+    font-weight: 500;
+    padding: 2px 6px;
+    outline: none;
+    width: 100%;
+  }
 
   /* MAIN CHAT AREA */
   #main {
@@ -611,9 +632,11 @@
       item.className = 'conv-item' + (c.id === activeConvId ? ' active' : '');
       item.dataset.id = c.id;
       const date = new Date(c.created_at).toLocaleDateString('en-US', {month:'short', day:'numeric'});
+      const previewHtml = c.preview ? `<div class="conv-preview">${escHtml(c.preview)}</div>` : '';
       item.innerHTML = `
         <div class="conv-info">
-          <div class="conv-title">${escHtml(c.title)}</div>
+          <div class="conv-title" onclick="startRename(event, ${c.id})">${escHtml(c.title)}</div>
+          ${previewHtml}
           <div class="conv-meta">${escHtml(c.team_member)} · ${date}</div>
         </div>
         <button class="conv-delete" onclick="deleteConversation(event, ${c.id})" title="Delete">✕</button>
@@ -947,6 +970,35 @@
   function autoResize(el) {
     el.style.height = 'auto';
     el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+  }
+
+  function startRename(e, id) {
+    e.stopPropagation();
+    const titleEl = e.target;
+    const current = titleEl.textContent;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'conv-rename-input';
+    input.value = current;
+    titleEl.replaceWith(input);
+    input.focus();
+    input.select();
+    const finish = async () => {
+      const newTitle = input.value.trim();
+      if (newTitle && newTitle !== current) {
+        await fetch(`/conversations/${id}`, {
+          method: 'PATCH',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({title: newTitle})
+        });
+      }
+      loadConversations();
+    };
+    input.addEventListener('blur', finish);
+    input.addEventListener('keydown', ev => {
+      if (ev.key === 'Enter') { ev.preventDefault(); input.blur(); }
+      if (ev.key === 'Escape') { input.value = current; input.blur(); }
+    });
   }
 
   function escHtml(str) {
