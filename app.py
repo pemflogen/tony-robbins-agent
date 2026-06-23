@@ -90,7 +90,10 @@ def chat():
 
 @app.route("/conversations", methods=["GET"])
 def get_conversations():
-    result = supabase.table("conversations").select("id,team_member,title,messages,created_at").eq("agent_id", AGENT_ID).order("created_at", desc=True).execute()
+    try:
+        result = supabase.table("conversations").select("id,team_member,title,messages,created_at").eq("agent_id", AGENT_ID).order("created_at", desc=True).execute()
+    except Exception:
+        result = supabase.table("conversations").select("id,team_member,title,messages,created_at").order("created_at", desc=True).execute()
     convs = []
     for row in result.data:
         preview = ""
@@ -117,12 +120,15 @@ def get_conversations():
 @app.route("/conversations", methods=["POST"])
 def save_conversation():
     data = request.json
-    result = supabase.table("conversations").insert({
+    row = {
         "team_member": data.get("team_member"),
         "title": data.get("title"),
         "messages": data.get("messages"),
-        "agent_id": AGENT_ID
-    }).execute()
+    }
+    try:
+        result = supabase.table("conversations").insert({**row, "agent_id": AGENT_ID}).execute()
+    except Exception:
+        result = supabase.table("conversations").insert(row).execute()
     return jsonify(result.data[0])
 
 @app.route("/conversations/<int:conv_id>", methods=["GET"])
