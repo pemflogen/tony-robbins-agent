@@ -165,6 +165,24 @@
   }
   .sidebar-header button:hover { background: #c14d1d; }
 
+  .sidebar-search {
+    padding: 8px 16px 0;
+  }
+  #search-input {
+    width: 100%;
+    background: #0a1628;
+    border: 1px solid #1e3a5f;
+    border-radius: 8px;
+    padding: 8px 12px;
+    color: #f5f0e8;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.82rem;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  #search-input:focus { border-color: #e8622c; }
+  #search-input::placeholder { color: #4a6280; }
+
   #conv-list {
     flex: 1;
     overflow-y: auto;
@@ -189,25 +207,16 @@
   .conv-item.active { background: #1e3a5f; border-left: 3px solid #e8622c; }
   .conv-info { flex: 1; min-width: 0; }
   .conv-title {
-    font-size: 0.85rem;
-    font-weight: 500;
+    font-size: 0.88rem;
+    font-weight: 600;
     color: #f5f0e8;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  .conv-preview {
-    font-size: 0.75rem;
-    color: #6a8aaa;
-    opacity: 0.7;
-    margin-top: 2px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
   .conv-meta {
-    font-size: 0.7rem;
-    color: #4a6280;
+    font-size: 0.68rem;
+    color: #3a5270;
     margin-top: 2px;
   }
   .conv-delete {
@@ -499,8 +508,8 @@
 <div id="save-modal">
   <div class="modal-box">
     <h3>Save Conversation</h3>
-    <input type="text" id="save-name" placeholder="Your name (e.g. Sarah)" />
     <input type="text" id="save-title" placeholder="Conversation title" />
+    <input type="text" id="save-name" placeholder="Your name (e.g. Sarah)" />
     <div class="modal-actions">
       <button class="btn-cancel" onclick="closeSaveModal()">Cancel</button>
       <button class="btn-save-confirm" onclick="confirmSave()">Save</button>
@@ -515,6 +524,9 @@
   <div id="sidebar">
     <div class="sidebar-header">
       <button onclick="newChat()">+ New Chat</button>
+    </div>
+    <div class="sidebar-search">
+      <input type="text" id="search-input" placeholder="Search chats..." oninput="filterConversations()" />
     </div>
     <div id="conv-list"></div>
   </div>
@@ -572,6 +584,7 @@
   const MAX_IMAGES = 5;
   let sidebarOpen = window.innerWidth > 640;
   let activeConvId = null;
+  let allConversations = [];
 
   // PASSWORD
   function checkPassword() {
@@ -615,9 +628,17 @@
   async function loadConversations() {
     try {
       const res = await fetch('/conversations');
-      const convs = await res.json();
-      renderConversations(convs);
+      allConversations = await res.json();
+      filterConversations();
     } catch(e) { console.error('Failed to load conversations', e); }
+  }
+
+  function filterConversations() {
+    const q = (document.getElementById('search-input').value || '').toLowerCase();
+    const filtered = q
+      ? allConversations.filter(c => c.title.toLowerCase().includes(q) || c.team_member.toLowerCase().includes(q))
+      : allConversations;
+    renderConversations(filtered);
   }
 
   function renderConversations(convs) {
@@ -632,11 +653,9 @@
       item.className = 'conv-item' + (c.id === activeConvId ? ' active' : '');
       item.dataset.id = c.id;
       const date = new Date(c.created_at).toLocaleDateString('en-US', {month:'short', day:'numeric'});
-      const previewHtml = c.preview ? `<div class="conv-preview">${escHtml(c.preview)}</div>` : '';
       item.innerHTML = `
         <div class="conv-info">
           <div class="conv-title" onclick="startRename(event, ${c.id})">${escHtml(c.title)}</div>
-          ${previewHtml}
           <div class="conv-meta">${escHtml(c.team_member)} · ${date}</div>
         </div>
         <button class="conv-delete" onclick="deleteConversation(event, ${c.id})" title="Delete">✕</button>
@@ -744,7 +763,9 @@
     document.getElementById('save-title').value = autoTitle;
     document.getElementById('save-name').value = '';
     document.getElementById('save-modal').classList.add('open');
-    document.getElementById('save-name').focus();
+    const titleInput = document.getElementById('save-title');
+    titleInput.focus();
+    titleInput.select();
   }
 
   function closeSaveModal() {
