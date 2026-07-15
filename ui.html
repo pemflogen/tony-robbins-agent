@@ -232,7 +232,26 @@
     line-height: 1;
     transition: color 0.15s;
   }
+  .conv-actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex-shrink: 0;
+  }
   .conv-delete:hover { color: #e74c3c; }
+  .conv-export {
+    background: none;
+    border: none;
+    color: #4a6280;
+    cursor: pointer;
+    font-size: 0.95rem;
+    padding: 2px 4px;
+    border-radius: 4px;
+    flex-shrink: 0;
+    line-height: 1;
+    transition: color 0.15s;
+  }
+  .conv-export:hover { color: #27ae60; }
   .conv-rename-input {
     background: #0a1628;
     border: 1px solid #e8622c;
@@ -659,7 +678,10 @@
           <div class="conv-title" onclick="startRename(event, ${c.id})">${escHtml(c.title)}</div>
           <div class="conv-meta">${escHtml(c.team_member)} · ${date}</div>
         </div>
-        <button class="conv-delete" onclick="deleteConversation(event, ${c.id})" title="Delete">✕</button>
+        <div class="conv-actions">
+          <button class="conv-export" onclick="exportConversation(event, ${c.id})" title="Export as text">⬇</button>
+          <button class="conv-delete" onclick="deleteConversation(event, ${c.id})" title="Delete">✕</button>
+        </div>
       `;
       item.addEventListener('click', () => loadConversation(c.id));
       list.appendChild(item);
@@ -732,6 +754,56 @@
     await fetch(`/conversations/${id}`, {method: 'DELETE'});
     if (activeConvId === id) newChat();
     loadConversations();
+  }
+
+  function messageToExportText(msg) {
+    if (typeof msg.content === 'string') return msg.content;
+    if (Array.isArray(msg.content)) {
+      return msg.content.map(part => {
+        if (part.type === 'text') return part.text;
+        if (part.type === 'image') return '[Image attached]';
+        return '';
+      }).join('\n').trim();
+    }
+    return '';
+  }
+
+  function sanitizeFilename(name) {
+    const cleaned = (name || 'conversation').replace(/[^a-z0-9\-_ ]/gi, '').trim().replace(/\s+/g, '_');
+    return (cleaned || 'conversation').slice(0, 60);
+  }
+
+  async function exportConversation(e, id) {
+    e.stopPropagation();
+    try {
+      const res = await fetch(`/conversations/${id}`);
+      const conv = await res.json();
+      const date = new Date(conv.created_at).toLocaleString('en-US', {year: 'numeric', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit'});
+      const lines = [
+        conv.title,
+        `Team Member: ${conv.team_member}`,
+        `Date: ${date}`,
+        '='.repeat(50),
+        ''
+      ];
+      (conv.messages || []).forEach(msg => {
+        const label = msg.role === 'user' ? 'User' : 'Coach';
+        lines.push(`${label}: ${messageToExportText(msg)}`);
+        lines.push('');
+      });
+      const blob = new Blob([lines.join('\n')], {type: 'text/plain'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${sanitizeFilename(conv.title)}.txt`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch(err) {
+      console.error('Failed to export conversation', err);
+      alert('Failed to export conversation.');
+    }
   }
 
   function newChat() {
