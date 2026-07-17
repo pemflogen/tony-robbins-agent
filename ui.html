@@ -1016,6 +1016,11 @@
     const text = input.value.trim();
     if (!text && !currentImages.length) return;
 
+    if (currentImages.some(img => img.isHeic)) {
+      alert("HEIC photos aren't supported for analysis. Please remove them or convert to JPEG/PNG before sending.");
+      return;
+    }
+
     input.value = '';
     autoResize(input);
     btn.disabled = true;
