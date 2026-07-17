@@ -48,12 +48,22 @@ def verify_password():
         return jsonify({"success": True})
     return jsonify({"success": False}), 401
 
+ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
+
 @app.route("/chat", methods=["POST"])
 def chat():
     data = request.json
     user_message = data.get("message", "")
     history = data.get("history", [])
     images = data.get("images", [])
+
+    for img in images:
+        media_type = img.get("media_type", "")
+        if media_type not in ALLOWED_IMAGE_TYPES:
+            return jsonify({
+                "error": f"Unsupported image format ({media_type or 'unknown'}). "
+                         f"Please use JPEG, PNG, GIF, or WebP - HEIC photos aren't supported."
+            }), 400
 
     context = get_relevant_context(user_message) if user_message else ""
 

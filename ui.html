@@ -1053,7 +1053,19 @@
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(payload)
       });
-      if (!res.ok || !res.body) throw new Error('Request failed');
+      if (!res.ok) {
+        let errMsg = 'Something went wrong. Please try again.';
+        try {
+          const errData = await res.json();
+          if (errData && errData.error) errMsg = errData.error;
+        } catch (e) {}
+        thinking.textContent = errMsg;
+        thinking.classList.remove('thinking');
+        btn.disabled = false;
+        input.focus();
+        return;
+      }
+      if (!res.body) throw new Error('Request failed');
       thinking.classList.remove('thinking');
       thinking.textContent = '';
       const chatEl = document.getElementById('chat');
