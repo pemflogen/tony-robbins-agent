@@ -412,6 +412,23 @@
     border: 1px solid #e8622c;
     display: block;
   }
+  .heic-placeholder {
+    width: 80px;
+    height: 80px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    background: #1e3a5f;
+    border: 1px solid #e8622c;
+    border-radius: 8px;
+    color: #9db4d1;
+    font-size: 0.65rem;
+    text-align: center;
+    padding: 4px;
+    box-sizing: border-box;
+  }
   .clear-image {
     position: absolute;
     top: -8px;
@@ -734,9 +751,17 @@
               imagesContainer.className = 'msg-images';
               wrapper.insertBefore(imagesContainer, bubble);
             }
-            const img = document.createElement('img');
-            img.src = `data:${part.source.media_type};base64,${part.source.data}`;
-            img.className = 'msg-image';
+            let img;
+            if (isHeicType(part.source.media_type)) {
+              img = document.createElement('div');
+              img.className = 'msg-image heic-placeholder';
+              img.textContent = '\uD83D\uDDBC\uFE0F HEIC';
+              img.title = "HEIC photos can't be previewed in this browser";
+            } else {
+              img = document.createElement('img');
+              img.src = `data:${part.source.media_type};base64,${part.source.data}`;
+              img.className = 'msg-image';
+            }
             imagesContainer.appendChild(img);
           }
         });
@@ -867,13 +892,24 @@
     e.target.value = '';
   }
 
+  function isHeicType(mediaType) {
+    const t = (mediaType || '').toLowerCase();
+    return t === 'image/heic' || t === 'image/heif';
+  }
+
+  function isHeicFile(file) {
+    if (isHeicType(file.type)) return true;
+    const name = (file.name || '').toLowerCase();
+    return name.endsWith('.heic') || name.endsWith('.heif');
+  }
+
   function readImageFile(file) {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = evt => {
         const dataUrl = evt.target.result;
         const comma = dataUrl.indexOf(',');
-        resolve({dataUrl, data: dataUrl.substring(comma + 1), type: file.type});
+        resolve({dataUrl, data: dataUrl.substring(comma + 1), type: file.type, isHeic: isHeicFile(file)});
       };
       reader.onerror = reject;
       reader.readAsDataURL(file);
@@ -883,7 +919,7 @@
   async function addImageFiles(files) {
     const toRead = [];
     for (const file of files) {
-      if (!file.type.startsWith('image/')) continue;
+      if (!file.type.startsWith('image/') && !isHeicFile(file)) continue;
       if (currentImages.length + toRead.length >= MAX_IMAGES) {
         alert(`You can attach up to ${MAX_IMAGES} images.`);
         break;
@@ -902,9 +938,17 @@
     currentImages.forEach((img, i) => {
       const item = document.createElement('div');
       item.className = 'image-preview-item';
-      const el = new Image();
-      el.src = img.dataUrl;
-      el.alt = 'Preview';
+      let el;
+      if (img.isHeic) {
+        el = document.createElement('div');
+        el.className = 'heic-placeholder';
+        el.textContent = '\uD83D\uDDBC\uFE0F HEIC';
+        el.title = "HEIC photos can't be previewed in this browser";
+      } else {
+        el = new Image();
+        el.src = img.dataUrl;
+        el.alt = 'Preview';
+      }
       const btn = document.createElement('button');
       btn.className = 'clear-image';
       btn.textContent = '✕';
@@ -928,7 +972,7 @@
   }
 
   // CHAT
-  function addMessage(role, text, imgSrcs) {
+  function addMessage(role, text, imgs) {
     const welcome = document.getElementById('welcome');
     if (welcome) welcome.remove();
     const chat = document.getElementById('chat');
@@ -937,14 +981,22 @@
     const label = document.createElement('div');
     label.className = 'msg-label';
     label.textContent = role === 'user' ? 'You' : 'Tony Coach';
-    if (imgSrcs && imgSrcs.length) {
+    if (imgs && imgs.length) {
       const imagesContainer = document.createElement('div');
       imagesContainer.className = 'msg-images';
-      imgSrcs.forEach(src => {
-        const img = document.createElement('img');
-        img.src = src;
-        img.className = 'msg-image';
-        imagesContainer.appendChild(img);
+      imgs.forEach(img => {
+        let el;
+        if (img.isHeic) {
+          el = document.createElement('div');
+          el.className = 'msg-image heic-placeholder';
+          el.textContent = '\uD83D\uDDBC\uFE0F HEIC';
+          el.title = "HEIC photos can't be previewed in this browser";
+        } else {
+          el = document.createElement('img');
+          el.src = img.dataUrl;
+          el.className = 'msg-image';
+        }
+        imagesContainer.appendChild(el);
       });
       wrapper.appendChild(imagesContainer);
     }
@@ -968,8 +1020,8 @@
     autoResize(input);
     btn.disabled = true;
 
-    const imgSrcs = currentImages.map(img => img.dataUrl);
-    addMessage('user', text || '(image)', imgSrcs);
+    const imgs = currentImages.map(img => ({dataUrl: img.dataUrl, type: img.type, isHeic: img.isHeic}));
+    addMessage('user', text || '(image)', imgs);
 
     const historyEntry = {role: 'user', content: text || ''};
     if (currentImages.length) {
