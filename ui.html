@@ -1053,10 +1053,21 @@
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(payload)
       });
-      const data = await res.json();
-      thinking.textContent = data.response;
+      if (!res.ok || !res.body) throw new Error('Request failed');
       thinking.classList.remove('thinking');
-      history.push({role: 'assistant', content: data.response});
+      thinking.textContent = '';
+      const chatEl = document.getElementById('chat');
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let fullText = '';
+      while (true) {
+        const {done, value} = await reader.read();
+        if (done) break;
+        fullText += decoder.decode(value, {stream: true});
+        thinking.textContent = fullText;
+        chatEl.scrollTop = chatEl.scrollHeight;
+      }
+      history.push({role: 'assistant', content: fullText});
     } catch(e) {
       thinking.textContent = 'Connection error. Please try again.';
       thinking.classList.remove('thinking');

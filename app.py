@@ -2,7 +2,7 @@ import os
 import voyageai
 from pinecone import Pinecone
 import anthropic
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory, Response
 from supabase import create_client
 import base64
 
@@ -80,13 +80,20 @@ def chat():
 
     messages = history[:-1] + [{"role": "user", "content": user_content}]
 
-    response = anthropic_client.messages.create(
-        model="claude-opus-4-5",
-        max_tokens=1000,
-        system=SYSTEM_PROMPT,
-        messages=messages
-    )
-    return jsonify({"response": response.content[0].text})
+    def generate():
+        try:
+            with anthropic_client.messages.stream(
+                model="claude-opus-4-5",
+                max_tokens=1000,
+                system=SYSTEM_PROMPT,
+                messages=messages
+            ) as stream:
+                for text_chunk in stream.text_stream:
+                    yield text_chunk
+        except Exception as e:
+            yield f"\n\n[Error: {e}]"
+
+    return Response(generate(), mimetype="text/plain")
 
 @app.route("/conversations", methods=["GET"])
 def get_conversations():
