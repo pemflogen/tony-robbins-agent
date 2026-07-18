@@ -37,6 +37,23 @@ def get_relevant_context(query):
     results = index.query(vector=embedding, top_k=5, include_metadata=True)
     return "\n\n".join([m["metadata"]["text"] for m in results["matches"]])
 
+def strip_images_from_history(history_messages):
+    """Remove image content blocks from historical messages - only the current
+    turn should carry images forward to the API. Prevents a bad or unsupported
+    image from an earlier turn (e.g. pre-dating HEIC validation) from failing
+    every subsequent request in the conversation."""
+    cleaned = []
+    for msg in history_messages:
+        content = msg.get("content")
+        if isinstance(content, list):
+            text_only = [part for part in content if part.get("type") != "image"]
+            if not text_only:
+                text_only = [{"type": "text", "text": "[image omitted]"}]
+            cleaned.append({**msg, "content": text_only})
+        else:
+            cleaned.append(msg)
+    return cleaned
+
 @app.route("/")
 def home():
     return send_from_directory(".", "ui.html")
@@ -88,7 +105,7 @@ def chat():
     else:
         user_content = f"Relevant Tony Robbins content:\n{context}\n\nUser message: {user_message}"
 
-    messages = history[:-1] + [{"role": "user", "content": user_content}]
+    messages = strip_images_from_history(history[:-1]) + [{"role": "user", "content": user_content}]
 
     def generate():
         try:
