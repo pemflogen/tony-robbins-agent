@@ -134,36 +134,30 @@ def chat():
 
 @app.route("/conversations", methods=["GET"])
 def get_conversations():
+    # Deliberately excludes the "messages" column: it can hold megabytes of
+    # base64 image data per conversation, and selecting it across every saved
+    # conversation for a list view can blow the Postgres statement timeout.
+    # The frontend doesn't render "preview" today, so it's kept as an empty
+    # string for API-shape compatibility rather than dropped.
     try:
-        result = supabase.table("conversations").select("id,team_member,title,messages,created_at").eq("agent_id", AGENT_ID).order("created_at", desc=True).execute()
+        result = supabase.table("conversations").select("id,team_member,title,created_at").eq("agent_id", AGENT_ID).order("created_at", desc=True).execute()
     except Exception:
         logger.exception("Supabase select with agent_id filter failed, falling back to unfiltered select")
         try:
-            result = supabase.table("conversations").select("id,team_member,title,messages,created_at").order("created_at", desc=True).execute()
+            result = supabase.table("conversations").select("id,team_member,title,created_at").order("created_at", desc=True).execute()
         except Exception:
             logger.exception("Supabase select (fallback) failed - unable to load conversations")
             return jsonify({"error": "Failed to load conversations"}), 500
-    convs = []
-    for row in result.data:
-        preview = ""
-        messages = row.get("messages") or []
-        for m in messages:
-            if m.get("role") == "user":
-                content = m.get("content", "")
-                if isinstance(content, str):
-                    preview = content[:60]
-                elif isinstance(content, list):
-                    text_part = next((p for p in content if p.get("type") == "text"), None)
-                    if text_part:
-                        preview = text_part.get("text", "")[:60]
-                break
-        convs.append({
+    convs = [
+        {
             "id": row["id"],
             "team_member": row["team_member"],
             "title": row["title"],
-            "preview": preview,
+            "preview": "",
             "created_at": row["created_at"],
-        })
+        }
+        for row in result.data
+    ]
     return jsonify(convs)
 
 @app.route("/conversations", methods=["POST"])
