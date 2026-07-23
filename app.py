@@ -1,10 +1,14 @@
 import os
+import logging
 import voyageai
 from pinecone import Pinecone
 import anthropic
 from flask import Flask, request, jsonify, send_from_directory, Response
 from supabase import create_client
 import base64
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
@@ -16,6 +20,12 @@ index = pc.Index("tony-robbins-agent")
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+try:
+    supabase.table("conversations").select("id").limit(1).execute()
+    logger.info("Supabase startup check OK - connected and 'conversations' table is reachable")
+except Exception:
+    logger.exception("Supabase startup check FAILED - cannot reach 'conversations' table. Check SUPABASE_URL/SUPABASE_KEY and table schema.")
 
 APP_PASSWORD = os.environ.get("APP_PASSWORD", "Got1Robbinsagent!")
 AGENT_ID = "tony-robbins"
@@ -127,7 +137,12 @@ def get_conversations():
     try:
         result = supabase.table("conversations").select("id,team_member,title,messages,created_at").eq("agent_id", AGENT_ID).order("created_at", desc=True).execute()
     except Exception:
-        result = supabase.table("conversations").select("id,team_member,title,messages,created_at").order("created_at", desc=True).execute()
+        logger.exception("Supabase select with agent_id filter failed, falling back to unfiltered select")
+        try:
+            result = supabase.table("conversations").select("id,team_member,title,messages,created_at").order("created_at", desc=True).execute()
+        except Exception:
+            logger.exception("Supabase select (fallback) failed - unable to load conversations")
+            return jsonify({"error": "Failed to load conversations"}), 500
     convs = []
     for row in result.data:
         preview = ""
@@ -162,12 +177,21 @@ def save_conversation():
     try:
         result = supabase.table("conversations").insert({**row, "agent_id": AGENT_ID}).execute()
     except Exception:
-        result = supabase.table("conversations").insert(row).execute()
+        logger.exception("Supabase insert with agent_id failed, falling back to insert without agent_id")
+        try:
+            result = supabase.table("conversations").insert(row).execute()
+        except Exception:
+            logger.exception("Supabase insert (fallback) failed - conversation was NOT saved")
+            return jsonify({"error": "Failed to save conversation"}), 500
     return jsonify(result.data[0])
 
 @app.route("/conversations/<int:conv_id>", methods=["GET"])
 def get_conversation(conv_id):
-    result = supabase.table("conversations").select("*").eq("id", conv_id).execute()
+    try:
+        result = supabase.table("conversations").select("*").eq("id", conv_id).execute()
+    except Exception:
+        logger.exception(f"Supabase select failed for conversation id={conv_id}")
+        return jsonify({"error": "Failed to load conversation"}), 500
     if result.data:
         return jsonify(result.data[0])
     return jsonify({"error": "Not found"}), 404
@@ -178,12 +202,20 @@ def rename_conversation(conv_id):
     title = data.get("title", "").strip()
     if not title:
         return jsonify({"error": "Title required"}), 400
-    supabase.table("conversations").update({"title": title}).eq("id", conv_id).execute()
+    try:
+        supabase.table("conversations").update({"title": title}).eq("id", conv_id).execute()
+    except Exception:
+        logger.exception(f"Supabase update (rename) failed for conversation id={conv_id}")
+        return jsonify({"error": "Failed to rename conversation"}), 500
     return jsonify({"success": True})
 
 @app.route("/conversations/<int:conv_id>", methods=["DELETE"])
 def delete_conversation(conv_id):
-    supabase.table("conversations").delete().eq("id", conv_id).execute()
+    try:
+        supabase.table("conversations").delete().eq("id", conv_id).execute()
+    except Exception:
+        logger.exception(f"Supabase delete failed for conversation id={conv_id}")
+        return jsonify({"error": "Failed to delete conversation"}), 500
     return jsonify({"success": True})
 
 if __name__ == "__main__":
