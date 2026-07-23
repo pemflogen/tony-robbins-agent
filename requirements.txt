@@ -4,3 +4,5 @@ pinecone
 voyageai
 supabase
 gunicorn
+pypdf
+python-docx

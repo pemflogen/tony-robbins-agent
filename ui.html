@@ -446,6 +446,52 @@
     justify-content: center;
     line-height: 1;
   }
+  .doc-preview-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: #1e3a5f;
+    border: 1px solid #e8622c;
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 0.8rem;
+    color: #c5d5e8;
+    max-width: 240px;
+  }
+  .doc-preview-item .doc-name {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .doc-remove {
+    background: none;
+    border: none;
+    color: #8a9bb5;
+    cursor: pointer;
+    font-size: 0.85rem;
+    line-height: 1;
+    padding: 2px;
+    flex-shrink: 0;
+  }
+  .doc-remove:hover { color: #e74c3c; }
+  .msg-docs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+  .msg-doc-chip {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: #0f2040;
+    border: 1px solid #1e3a5f;
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 0.78rem;
+    color: #c5d5e8;
+    max-width: 220px;
+  }
+  .msg-doc-chip .doc-name {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
   .input-row {
     display: flex;
     gap: 10px;
@@ -606,8 +652,8 @@
     <div id="input-area">
       <div id="image-preview-area"></div>
       <div class="input-row">
-        <button id="image-btn" onclick="document.getElementById('file-input').click()" title="Upload up to 5 images">📎</button>
-        <input type="file" id="file-input" accept="image/*" multiple onchange="handleImageSelect(event)" />
+        <button id="image-btn" onclick="document.getElementById('file-input').click()" title="Upload up to 5 images, PDFs, or Word docs">📎</button>
+        <input type="file" id="file-input" accept="image/*,.pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" multiple onchange="handleFileSelect(event)" />
         <textarea id="user-input" placeholder="Ask a question or describe what you're working through..." rows="1" onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
         <button id="send-btn" onclick="sendMessage()">➤</button>
       </div>
@@ -618,7 +664,9 @@
 <script>
   let history = [];
   let currentImages = []; // [{data, type}]
+  let currentDocuments = []; // [{filename, text, status}]
   const MAX_IMAGES = 5;
+  const MAX_DOCUMENTS = 3;
   let sidebarOpen = window.innerWidth > 640;
   let activeConvId = null;
   let allConversations = [];
@@ -886,10 +934,24 @@
     } catch(e) { alert('Save failed. Please try again.'); }
   }
 
-  // IMAGE
-  function handleImageSelect(e) {
-    addImageFiles(Array.from(e.target.files));
+  // FILES (images + documents)
+  function handleFileSelect(e) {
+    addFiles(Array.from(e.target.files));
     e.target.value = '';
+  }
+
+  function isDocumentFile(file) {
+    const name = (file.name || '').toLowerCase();
+    return name.endsWith('.pdf') || name.endsWith('.docx') ||
+      file.type === 'application/pdf' ||
+      file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+  }
+
+  async function addFiles(files) {
+    const images = files.filter(f => f.type.startsWith('image/') || isHeicFile(f));
+    const docs = files.filter(f => isDocumentFile(f));
+    if (images.length) await addImageFiles(images);
+    if (docs.length) await addDocumentFiles(docs);
   }
 
   function isHeicType(mediaType) {
@@ -929,10 +991,49 @@
     if (!toRead.length) return;
     const loaded = await Promise.all(toRead.map(readImageFile));
     currentImages.push(...loaded);
-    renderImagePreviews();
+    renderAttachmentPreviews();
   }
 
-  function renderImagePreviews() {
+  // DOCUMENTS (PDF / .docx)
+  async function addDocumentFiles(files) {
+    const toUpload = [];
+    for (const file of files) {
+      if (currentDocuments.length + toUpload.length >= MAX_DOCUMENTS) {
+        alert(`You can attach up to ${MAX_DOCUMENTS} documents.`);
+        break;
+      }
+      toUpload.push(file);
+    }
+    for (const file of toUpload) {
+      await uploadDocument(file);
+    }
+  }
+
+  async function uploadDocument(file) {
+    const entry = {filename: file.name, text: null, status: 'uploading'};
+    currentDocuments.push(entry);
+    renderAttachmentPreviews();
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch('/upload-document', {method: 'POST', body: formData});
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to process document');
+      entry.text = data.text;
+      entry.filename = data.filename;
+      entry.status = 'ready';
+    } catch (e) {
+      currentDocuments.splice(currentDocuments.indexOf(entry), 1);
+      alert(e.message || 'Failed to upload document. Please try again.');
+    }
+    renderAttachmentPreviews();
+  }
+
+  function buildDocumentContextText(docs) {
+    return docs.map(d => `The user has attached a document. Contents: ${d.text}`).join('\n\n');
+  }
+
+  function renderAttachmentPreviews() {
     const area = document.getElementById('image-preview-area');
     area.innerHTML = '';
     currentImages.forEach((img, i) => {
@@ -957,22 +1058,46 @@
       item.appendChild(btn);
       area.appendChild(item);
     });
-    area.classList.toggle('has-images', currentImages.length > 0);
+    currentDocuments.forEach((doc, i) => {
+      const item = document.createElement('div');
+      item.className = 'doc-preview-item';
+      const icon = document.createElement('span');
+      icon.textContent = '📄';
+      const name = document.createElement('span');
+      name.className = 'doc-name';
+      name.textContent = doc.status === 'uploading' ? `Reading ${doc.filename}...` : doc.filename;
+      name.title = doc.filename;
+      const btn = document.createElement('button');
+      btn.className = 'doc-remove';
+      btn.textContent = '✕';
+      btn.onclick = () => removeDocument(i);
+      item.appendChild(icon);
+      item.appendChild(name);
+      item.appendChild(btn);
+      area.appendChild(item);
+    });
+    area.classList.toggle('has-images', currentImages.length > 0 || currentDocuments.length > 0);
   }
 
   function removeImage(i) {
     currentImages.splice(i, 1);
-    renderImagePreviews();
+    renderAttachmentPreviews();
+  }
+
+  function removeDocument(i) {
+    currentDocuments.splice(i, 1);
+    renderAttachmentPreviews();
   }
 
   function clearImages() {
     currentImages = [];
-    renderImagePreviews();
+    currentDocuments = [];
+    renderAttachmentPreviews();
     document.getElementById('file-input').value = '';
   }
 
   // CHAT
-  function addMessage(role, text, imgs) {
+  function addMessage(role, text, imgs, docs) {
     const welcome = document.getElementById('welcome');
     if (welcome) welcome.remove();
     const chat = document.getElementById('chat');
@@ -1000,6 +1125,24 @@
       });
       wrapper.appendChild(imagesContainer);
     }
+    if (docs && docs.length) {
+      const docsContainer = document.createElement('div');
+      docsContainer.className = 'msg-docs';
+      docs.forEach(doc => {
+        const chip = document.createElement('div');
+        chip.className = 'msg-doc-chip';
+        const icon = document.createElement('span');
+        icon.textContent = '📄';
+        const name = document.createElement('span');
+        name.className = 'doc-name';
+        name.textContent = doc.filename;
+        chip.title = doc.filename;
+        chip.appendChild(icon);
+        chip.appendChild(name);
+        docsContainer.appendChild(chip);
+      });
+      wrapper.appendChild(docsContainer);
+    }
     const bubble = document.createElement('div');
     bubble.className = `msg-bubble ${role}`;
     bubble.textContent = text;
@@ -1014,10 +1157,15 @@
     const input = document.getElementById('user-input');
     const btn = document.getElementById('send-btn');
     const text = input.value.trim();
-    if (!text && !currentImages.length) return;
+    if (!text && !currentImages.length && !currentDocuments.length) return;
 
     if (currentImages.some(img => img.isHeic)) {
       alert("HEIC photos aren't supported for analysis. Please remove them or convert to JPEG/PNG before sending.");
+      return;
+    }
+
+    if (currentDocuments.some(doc => doc.status === 'uploading')) {
+      alert("Please wait for the document to finish uploading before sending.");
       return;
     }
 
@@ -1026,12 +1174,17 @@
     btn.disabled = true;
 
     const imgs = currentImages.map(img => ({dataUrl: img.dataUrl, type: img.type, isHeic: img.isHeic}));
-    addMessage('user', text || '(image)', imgs);
+    const docs = currentDocuments.map(doc => ({filename: doc.filename}));
+    const placeholderText = text || (imgs.length ? '(image)' : '(document attached)');
+    addMessage('user', placeholderText, imgs, docs);
 
-    const historyEntry = {role: 'user', content: text || ''};
+    const docContext = currentDocuments.length ? buildDocumentContextText(currentDocuments) : '';
+    const messageText = [docContext, text].filter(Boolean).join('\n\n');
+
+    const historyEntry = {role: 'user', content: messageText};
     if (currentImages.length) {
       historyEntry.content = [
-        {type: 'text', text: text || 'Please analyze this and coach me on my mindset, beliefs, and next decisive action.'},
+        {type: 'text', text: messageText || 'Please analyze this and coach me on my mindset, beliefs, and next decisive action.'},
         ...currentImages.map(img => ({type: 'image', source: {type: 'base64', media_type: img.type, data: img.data}}))
       ];
     }
@@ -1041,7 +1194,7 @@
     thinking.classList.add('thinking');
 
     const payload = {
-      message: text,
+      message: messageText,
       history,
       images: currentImages.map(img => ({data: img.data, media_type: img.type}))
     };
@@ -1128,8 +1281,8 @@
     e.preventDefault();
     dragCounter = 0;
     mainEl.classList.remove('drag-over');
-    const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
-    if (files.length) addImageFiles(files);
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length) addFiles(files);
   });
 
   // Prevent the browser from navigating away if a file is dropped outside the chat area

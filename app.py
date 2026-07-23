@@ -1,10 +1,13 @@
 import os
+import io
 import logging
 import voyageai
 from pinecone import Pinecone
 import anthropic
 from flask import Flask, request, jsonify, send_from_directory, Response
 from supabase import create_client
+from pypdf import PdfReader
+from docx import Document
 import base64
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -131,6 +134,43 @@ def chat():
             yield f"\n\n[Error: {e}]"
 
     return Response(generate(), mimetype="text/plain")
+
+ALLOWED_DOCUMENT_EXTENSIONS = {"pdf", "docx"}
+MAX_DOCUMENT_SIZE_BYTES = 100 * 1024 * 1024  # 100MB
+
+def extract_pdf_text(file_bytes):
+    reader = PdfReader(io.BytesIO(file_bytes))
+    return "\n\n".join(page.extract_text() or "" for page in reader.pages).strip()
+
+def extract_docx_text(file_bytes):
+    doc = Document(io.BytesIO(file_bytes))
+    return "\n".join(p.text for p in doc.paragraphs).strip()
+
+@app.route("/upload-document", methods=["POST"])
+def upload_document():
+    file = request.files.get("file")
+    if not file or not file.filename:
+        return jsonify({"error": "No file provided"}), 400
+
+    filename = file.filename
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    if ext not in ALLOWED_DOCUMENT_EXTENSIONS:
+        return jsonify({"error": "Unsupported file type. Please upload a PDF or .docx file."}), 400
+
+    file_bytes = file.read()
+    if len(file_bytes) > MAX_DOCUMENT_SIZE_BYTES:
+        return jsonify({"error": "Document is too large. Please upload a file under 100MB."}), 400
+
+    try:
+        text = extract_pdf_text(file_bytes) if ext == "pdf" else extract_docx_text(file_bytes)
+    except Exception:
+        logger.exception(f"Failed to extract text from uploaded document: {filename}")
+        return jsonify({"error": "Failed to read document. It may be corrupted or password-protected."}), 400
+
+    if not text:
+        return jsonify({"error": "No extractable text found in this document."}), 400
+
+    return jsonify({"filename": filename, "text": text})
 
 @app.route("/conversations", methods=["GET"])
 def get_conversations():
