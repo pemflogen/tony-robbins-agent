@@ -192,6 +192,121 @@ def upload_document():
 
     return jsonify({"filename": filename, "text": text})
 
+MAX_MEMORY_CONVERSATIONS = 20
+MEMORY_SNIPPET_CHARS = 500
+
+def build_conversation_snippet(messages, max_chars=MEMORY_SNIPPET_CHARS):
+    """Concatenate a conversation's message text in order and truncate. Used
+    only to build a short snippet for memory search - never sends a full
+    transcript anywhere."""
+    parts = []
+    total = 0
+    for msg in messages or []:
+        content = msg.get("content")
+        if isinstance(content, str):
+            text = content
+        elif isinstance(content, list):
+            text = " ".join(part.get("text", "") for part in content if part.get("type") == "text")
+        else:
+            text = ""
+        if text:
+            parts.append(text)
+            total += len(text)
+        if total >= max_chars:
+            break
+    return " ".join(parts)[:max_chars]
+
+@app.route("/search-memory", methods=["POST"])
+def search_memory():
+    data = request.json
+    query = (data.get("query") or "").strip()
+    team_member = (data.get("team_member") or "").strip()
+    if not query or not team_member:
+        return jsonify({"error": "query and team_member are required"}), 400
+
+    try:
+        result = (
+            supabase.table("conversations")
+            .select("id,title,created_at")
+            .eq("agent_id", AGENT_ID)
+            .eq("team_member", team_member)
+            .order("created_at", desc=True)
+            .limit(MAX_MEMORY_CONVERSATIONS)
+            .execute()
+        )
+    except Exception:
+        logger.exception("Supabase select with agent_id filter failed while searching memory, falling back to unfiltered-by-agent select")
+        try:
+            result = (
+                supabase.table("conversations")
+                .select("id,title,created_at")
+                .eq("team_member", team_member)
+                .order("created_at", desc=True)
+                .limit(MAX_MEMORY_CONVERSATIONS)
+                .execute()
+            )
+        except Exception:
+            logger.exception("Supabase select (fallback) failed - unable to search past conversations")
+            return jsonify({"error": "Failed to search past conversations"}), 500
+
+    conv_meta = result.data or []
+    if not conv_meta:
+        return jsonify({"summary": "", "matched_count": 0})
+
+    # Fetch each conversation's "messages" one row at a time rather than
+    # selecting it across all matched rows in a single query - a single
+    # conversation can run into the megabytes (embedded images, uploaded
+    # documents), and pulling that across many rows at once is exactly what
+    # previously blew a Postgres statement timeout on the conversation list
+    # view. One row at a time keeps each query cheap regardless of how large
+    # any individual conversation has grown.
+    snippets = []
+    for meta in conv_meta:
+        try:
+            row = supabase.table("conversations").select("messages").eq("id", meta["id"]).execute()
+        except Exception:
+            logger.exception(f"Supabase select failed for conversation id={meta.get('id')} while building memory snippet")
+            continue
+        if not row.data:
+            continue
+        snippet = build_conversation_snippet(row.data[0].get("messages"))
+        if snippet:
+            snippets.append({
+                "title": meta.get("title") or "Untitled",
+                "created_at": meta.get("created_at", ""),
+                "snippet": snippet,
+            })
+
+    if not snippets:
+        return jsonify({"summary": "", "matched_count": 0})
+
+    conversations_block = "\n\n".join(
+        f'{i + 1}. "{c["title"]}" ({c["created_at"]}):\n{c["snippet"]}'
+        for i, c in enumerate(snippets)
+    )
+
+    summarization_prompt = f"""Below are short excerpts from a user's past saved conversations with this coach, most recent first. The user just asked: "{query}"
+
+{conversations_block}
+
+Identify which of the above conversations (if any) are relevant to what the user is asking about. Write a brief 2-4 sentence summary of ONLY the relevant content, referencing specific details the user would recognize. If none of the conversations relate to the query, respond with exactly: No relevant past conversations found."""
+
+    try:
+        response = anthropic_client.messages.create(
+            model="claude-opus-4-5",
+            max_tokens=400,
+            messages=[{"role": "user", "content": summarization_prompt}],
+        )
+        summary_text = response.content[0].text.strip()
+    except Exception:
+        logger.exception("Anthropic summarization failed while searching memory")
+        return jsonify({"error": "Failed to summarize past conversations"}), 500
+
+    if "no relevant past conversations found" in summary_text.lower():
+        summary_text = ""
+
+    return jsonify({"summary": summary_text, "matched_count": len(snippets)})
+
 @app.route("/conversations", methods=["GET"])
 def get_conversations():
     # Deliberately excludes the "messages" column: it can hold megabytes of

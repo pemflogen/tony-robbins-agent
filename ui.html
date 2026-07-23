@@ -670,6 +670,7 @@
   let sidebarOpen = window.innerWidth > 640;
   let activeConvId = null;
   let allConversations = [];
+  let currentUserName = localStorage.getItem('teamMemberName') || '';
 
   // PASSWORD
   function checkPassword() {
@@ -929,6 +930,8 @@
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({team_member: name, title, messages: history})
       });
+      currentUserName = name;
+      localStorage.setItem('teamMemberName', name);
       closeSaveModal();
       loadConversations();
     } catch(e) { alert('Save failed. Please try again.'); }
@@ -1097,6 +1100,37 @@
     document.getElementById('file-input').value = '';
   }
 
+  // MEMORY (on-demand recall of past saved conversations)
+  const MEMORY_TRIGGER_PHRASES = [
+    'remember when',
+    'in our last session',
+    'we talked about',
+    'look back at',
+    'search our history',
+  ];
+
+  function containsMemoryTrigger(text) {
+    const lower = (text || '').toLowerCase();
+    return MEMORY_TRIGGER_PHRASES.some(phrase => lower.includes(phrase));
+  }
+
+  async function searchMemory(query) {
+    if (!currentUserName) return '';
+    try {
+      const res = await fetch('/search-memory', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({query, team_member: currentUserName})
+      });
+      if (!res.ok) return '';
+      const data = await res.json();
+      return data.summary || '';
+    } catch (e) {
+      console.error('Memory search failed', e);
+      return '';
+    }
+  }
+
   // CHAT
   function addMessage(role, text, imgs, docs) {
     const welcome = document.getElementById('welcome');
@@ -1180,7 +1214,25 @@
     addMessage('user', placeholderText, imgs, docs);
 
     const docContext = currentDocuments.length ? buildDocumentContextText(currentDocuments) : '';
-    const messageText = [docContext, text].filter(Boolean).join('\n\n');
+
+    // Memory is only ever looked up when the user explicitly asks to recall
+    // something - no lookup happens on ordinary messages.
+    let memoryContext = '';
+    let thinking;
+    if (containsMemoryTrigger(text) && currentUserName) {
+      thinking = addMessage('agent', 'Searching your past conversations...');
+      thinking.classList.add('thinking');
+      const summary = await searchMemory(text);
+      if (summary) {
+        memoryContext = `Relevant context from past conversations: ${summary}`;
+      }
+      thinking.textContent = 'Thinking...';
+    } else {
+      thinking = addMessage('agent', 'Thinking...');
+      thinking.classList.add('thinking');
+    }
+
+    const messageText = [memoryContext, docContext, text].filter(Boolean).join('\n\n');
 
     const historyEntry = {role: 'user', content: messageText};
     if (currentImages.length) {
@@ -1190,9 +1242,6 @@
       ];
     }
     history.push(historyEntry);
-
-    const thinking = addMessage('agent', 'Thinking...');
-    thinking.classList.add('thinking');
 
     const payload = {
       message: messageText,
