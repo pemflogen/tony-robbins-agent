@@ -14,6 +14,12 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
+# Hard cap on any single request body, enforced by Werkzeug before it's read
+# into memory. Without this, Flask buffers a request of any size (JSON or
+# multipart) fully in RAM before app code runs - a single huge /chat payload
+# or /upload-document upload can otherwise balloon memory unbounded. 105MB
+# covers the 100MB document upload limit plus multipart/JSON overhead.
+app.config["MAX_CONTENT_LENGTH"] = 105 * 1024 * 1024
 
 voyage_client = voyageai.Client(api_key=os.environ.get("VOYAGE_API_KEY"))
 pc = Pinecone(api_key=os.environ.get("PINECONE_API_KEY"))
@@ -79,6 +85,7 @@ def verify_password():
     return jsonify({"success": False}), 401
 
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
+MAX_CHAT_IMAGES = 5
 
 @app.route("/chat", methods=["POST"])
 def chat():
@@ -86,6 +93,9 @@ def chat():
     user_message = data.get("message", "")
     history = data.get("history", [])
     images = data.get("images", [])
+
+    if len(images) > MAX_CHAT_IMAGES:
+        return jsonify({"error": f"Too many images attached. Please attach up to {MAX_CHAT_IMAGES} images."}), 400
 
     for img in images:
         media_type = img.get("media_type", "")
@@ -174,6 +184,8 @@ def upload_document():
     except Exception:
         logger.exception(f"Failed to extract text from uploaded document: {filename}")
         return jsonify({"error": "Failed to read document. It may be corrupted or password-protected."}), 400
+    finally:
+        del file_bytes
 
     if not text:
         return jsonify({"error": "No extractable text found in this document."}), 400
