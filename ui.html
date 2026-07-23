@@ -797,7 +797,7 @@
             if (!imagesContainer) {
               imagesContainer = document.createElement('div');
               imagesContainer.className = 'msg-images';
-              wrapper.insertBefore(imagesContainer, bubble);
+              wrapper.appendChild(imagesContainer);
             }
             let img;
             if (isHeicType(part.source.media_type)) {
